@@ -1,0 +1,228 @@
+
+# Assignment 3
+# Group 12
+
+# Laust Lund Lillebæk, s203715
+# Mathias Hasenschwandtner, s203716
+# Daniel Raventos Jensen, s203722
+
+#_______________________________________________________________
+
+# Import libraries
+
+from pathlib import Path
+import ifcopenshell
+import ifcopenshell.api
+import math
+
+
+#_______________________________________________________________
+
+# Import model
+
+modelname = "LLYN - ARK"
+
+try:
+    dir_path = Path(__file__).parent
+    model_url = Path.joinpath(dir_path, 'model', modelname).with_suffix('.ifc')
+    model = ifcopenshell.open(model_url)
+except OSError:
+    try:
+        import bpy
+        model_url = Path.joinpath(Path(bpy.context.space_data.text.filepath).parent, 'model', modelname).with_suffix('.ifc')
+        model = ifcopenshell.open(model_url)
+    except OSError:
+        print(f"ERROR: please check your model folder : {model_url} does not exist")
+
+#_______________________________________________________________
+
+# Function - Window area (assuming recangular geometry)
+
+def WindowArea(window):
+        
+        length = window.get_info().get('OverallHeight', None) / 1000
+        width = window.get_info().get('OverallWidth', None) / 1000
+        
+        if length is not None and width is not None:
+            area = length * width
+            
+        else:
+            pass
+        
+        return area
+
+#_______________________________________________________________
+
+# Function - Crane requirement
+
+def CraneRequirement(window):
+    
+    # area
+    area = WindowArea(window)
+    
+    # Height
+    window_location = window.ObjectPlacement.RelativePlacement.Location.Coordinates
+    z_coordinate = window_location[2]/1000
+    
+    # Crane requirement
+    if z_coordinate > 1.5 and area > 1.5:
+        crane = "Requires crane"
+    elif area > 6:
+        crane = "Requires crane"
+    else:
+        crane = "Doesn't require crane"
+    
+    return crane
+
+#_______________________________________________________________
+
+# Function - Window weight
+
+def WindowWeight(window):
+
+    # area
+    area = WindowArea(window)
+    
+    # Volume
+    volume = area * 0.012
+    
+    # Weight
+    weight = volume * 2510
+    
+    return weight
+
+#_______________________________________________________________
+
+# Function - Transportation method
+
+# Transportation types:
+# van type 2 - 2x4.2x2.3 m (805 kg)
+# van type 1 - 1.8x3.5x2 m (1214 kg)
+# 5 axeled truck - (47000 kg)
+
+def TransportMethod(window):
+    
+    # Dimensions
+    a = window.get_info().get('OverallHeight', None) / 1000
+    b = window.get_info().get('OverallWidth', None) / 1000
+    
+    if a >= b:
+        length = a
+        width = b
+    else:
+        length = b
+        width = a
+    
+    # Weight
+    weight = WindowWeight(window)
+    
+    if length <= 3.5 and width <= 1.8:
+        transport = "van type G4"
+    elif length <= 4.2 and width <= 2:
+        transport = "van type H4"
+    else:
+        transport = "5 axeled truck"
+    
+    return transport
+
+#_______________________________________________________________
+
+# Create property set for each window and matrix with all relevant information
+
+owner_history = model.by_type("IfcOwnerHistory")[0]
+
+matrix = []
+
+windows = model.by_type('IfcWindow')
+
+for i in range(len(windows)):
+    
+    window = model.by_type('IfcWindow')[i]
+    
+    window_nr = i+1
+    window_ID= model.by_type('IfcWindow')[i][0]
+    
+    height = window.get_info().get('OverallHeight', None) / 1000
+    width = window.get_info().get('OverallWidth', None) / 1000
+    
+    weight = WindowWeight(window)
+    
+    crane = CraneRequirement(window)
+    transport = TransportMethod(model.by_type('IfcWindow')[i])
+    
+    # Can be carried by two people
+    if weight <= 80:
+        carry = True
+    else:
+        carry = False
+    
+    
+    # Create property
+    PropertySet = ifcopenshell.api.run("pset.add_pset", model, product=window, name="Construction information")
+    ifcopenshell.api.run("pset.edit_pset", model, pset=PropertySet, properties={"Mounting method": crane, "Transport method": transport, "Can be carried": carry})
+
+
+    matrix.append([window_nr, window_ID, round(height,1), round(width,1), round(weight,1), crane, transport, carry])
+
+#_______________________________________________________________
+
+# Prints
+
+print(" ")
+print("The following data represents, for each window:")
+print("     - The associated number")
+print("     - The associated Global ID")
+print("     - The window height")
+print("     - The window width")
+print("     - The window weight")
+print("     - Whether mounting requires a crane")
+print("     - The required transportation method")
+print("     - Whether the window can be carried by at least two people")
+print(" ")
+
+print("Crane Requirement:")
+print("A crane is required if the window is placed higher than 1.5 m "
+"and the window area is above 1.5 m^2, or if the area is above 6 m^2, making manual transportation highly impractical. "
+"This can be altered in the script to fit specific needs.")
+
+print(" ")
+
+print("Transportation:")
+print("The needed transportation method is determined by the length and width of the window. The specified transportation methods are "
+"a type G4 van (2x4.2x2.3 m), a type H4 van (1.8x3.5x2 m), and a 5 axeled truck. This too can be altered.")
+
+print(" ")
+
+print("Carry capacity:")
+print("Whether the window can be carried by two people or not is based on health information. For one person, a maximum carried "
+"weight of 50 kg is recommended, hence, an estimated maximum weight of 80 kg is specified in the program.")
+
+print(" ")
+print(" ")
+
+print("All construction information is added to the ifc file as a property for each window.")
+
+print(" ")
+
+for row in matrix:
+    print(f"Nr: {row[0]}, ID: {row[1]}, Height: {row[2]} m, Width: {row[3]} m, Weight: {row[4]}, Requires crane: {row[5]}, Transport method: {row[6]}, Can be carried: {row[7]}")
+
+
+print(" ")
+print(" ")
+
+print("The following data represents and example of ifc properties for window nr. 1. From here, it can be seen that "
+"the construction information is added.")
+
+print(" ")
+
+# Get all properties and quantities as a dictionary
+# returns {"Pset_WallCommon": {"id": 123, "FireRating": "2HR", ...}}
+psets = ifcopenshell.util.element.get_psets(model.by_type('IfcWindow')[0])
+print(psets)
+
+#_______________________________________________________________
+
+# Save altered model
+
+# model.write(model_file_path)
